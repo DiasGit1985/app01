@@ -4,7 +4,7 @@ from prophet import Prophet
 import matplotlib.pyplot as plt
 import unicodedata
 
-st.set_page_config(page_title="Previsão de Vendas ERP (Completa + Exportação)", layout="wide")
+st.set_page_config(page_title="Previsão de Vendas ERP (Final)", layout="wide")
 st.title("📈 Previsão de Vendas por Produto - ERP HTML")
 
 def normalizar(col):
@@ -65,7 +65,9 @@ if arquivo:
             modelo.fit(df_prod)
             futuro = modelo.make_future_dataframe(periods=meses, freq='M')
             previsao = modelo.predict(futuro)
+
             fig1 = modelo.plot(previsao)
+            fig1.set_size_inches(10, 4)
             st.pyplot(fig1)
 
             # TABELA GERAL DE PREVISÕES
