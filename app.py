@@ -3,50 +3,54 @@ import pandas as pd
 from prophet import Prophet
 import matplotlib.pyplot as plt
 
-st.set_page_config(page_title="Previsão de Vendas", layout="wide")
-st.title("📈 Previsão de Vendas com IA")
+st.set_page_config(page_title="Previsão de Vendas por Subgrupo", layout="wide")
+st.title("📈 Previsão de Vendas com IA por Subgrupo de Produtos")
 
 st.markdown("""
-Esta ferramenta permite subir uma planilha com os dados históricos de vendas para gerar a previsão dos próximos 3 meses.  
-A planilha deve conter **duas colunas**:
-- `Data` (formato ano-mês, ex: 2023-01)
+Envie uma planilha com colunas:
+- `Data`
 - `Quantidade Vendida`
+- `Produto`
+- `Subgrupo` (ou Código do Subgrupo)
+
+Depois selecione o subgrupo e a quantidade de meses a prever.
 """)
 
-# Upload
-arquivo = st.file_uploader("Envie sua planilha Excel (.xlsx)", type=["xlsx"])
+arquivo = st.file_uploader("📤 Envie sua planilha Excel", type=["xlsx"])
 
 if arquivo:
     try:
         df = pd.read_excel(arquivo)
-
         st.subheader("Pré-visualização dos dados")
         st.dataframe(df.head())
 
-        # Preparar dados para o Prophet
-        df = df.rename(columns={"Data": "ds", "Quantidade Vendida": "y"})
-        df["ds"] = pd.to_datetime(df["ds"])
+        # Filtro de subgrupo
+        subgrupos = df['Subgrupo'].unique()
+        subgrupo_selecionado = st.selectbox("Selecione o subgrupo", subgrupos)
 
-        modelo = Prophet()
-        modelo.fit(df)
+        # Filtro de meses para previsão
+        meses = st.slider("Quantos meses deseja prever?", 1, 12, 3)
 
-        futuro = modelo.make_future_dataframe(periods=3, freq='M')
-        previsao = modelo.predict(futuro)
+        # Filtrar pelo subgrupo
+        df_filtrado = df[df['Subgrupo'] == subgrupo_selecionado]
 
-        st.subheader("📊 Gráfico da Previsão")
-        fig1 = modelo.plot(previsao)
-        st.pyplot(fig1)
+        # Obter lista de produtos dentro do subgrupo
+        produtos = df_filtrado['Produto'].unique()
 
-        st.subheader("📉 Componentes da Previsão")
-        fig2 = modelo.plot_components(previsao)
-        st.pyplot(fig2)
+        for produto in produtos:
+            st.markdown(f"### 📦 Produto: {produto}")
+            df_prod = df_filtrado[df_filtrado['Produto'] == produto][['Data', 'Quantidade Vendida']].copy()
+            df_prod = df_prod.rename(columns={"Data": "ds", "Quantidade Vendida": "y"})
+            df_prod['ds'] = pd.to_datetime(df_prod['ds'])
 
-        # Mostrar a tabela com os valores futuros
-        df_futuro = previsao[previsao["ds"] > df["ds"].max()][["ds", "yhat", "yhat_lower", "yhat_upper"]]
-        df_futuro.columns = ["Data Prevista", "Estimado", "Limite Inferior", "Limite Superior"]
-        df_futuro = df_futuro.round(0).astype({"Estimado": int, "Limite Inferior": int, "Limite Superior": int})
-        st.subheader("📄 Tabela de Previsões Futuras")
-        st.dataframe(df_futuro)
+            modelo = Prophet()
+            modelo.fit(df_prod)
+
+            futuro = modelo.make_future_dataframe(periods=meses, freq='M')
+            previsao = modelo.predict(futuro)
+
+            fig1 = modelo.plot(previsao)
+            st.pyplot(fig1)
 
     except Exception as e:
-        st.error(f"Erro ao processar o arquivo: {e}")
+        st.error(f"Erro ao processar os dados: {e}")
