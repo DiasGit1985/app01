@@ -4,16 +4,8 @@ from prophet import Prophet
 import matplotlib.pyplot as plt
 import unicodedata
 
-st.set_page_config(page_title="Previsão de Vendas ERP (Final Robusta)", layout="wide")
-st.title("📈 Previsão de Vendas direto do ERP (HTML final robusto)")
-
-st.markdown("""
-Este app foi preparado para arquivos HTML exportados do ERP, com:
-- Linha 1 contendo o SQL (ignorada)
-- Linha 2 com os títulos das colunas
-- Linha 3 em diante com os dados
-- Nomes de colunas com ou sem acento são tratados automaticamente
-""")
+st.set_page_config(page_title="Previsão de Vendas ERP (Filtro de Produto)", layout="wide")
+st.title("📈 Previsão de Vendas por Produto - ERP HTML")
 
 def normalizar(col):
     return unicodedata.normalize("NFKD", col).encode("ASCII", "ignore").decode("utf-8").lower().replace(" ", "").replace("_", "")
@@ -30,23 +22,20 @@ arquivo = st.file_uploader("📤 Envie seu arquivo HTML exportado do ERP", type=
 
 if arquivo:
     try:
-        # Força o cabeçalho na segunda linha (pula o SQL)
         tabelas = pd.read_html(arquivo, header=1)
         df = tabelas[0]
 
         st.subheader("Pré-visualização da tabela principal")
         st.dataframe(df.head())
 
-        # Normalizar colunas e aplicar renomeação se possível
+        # Renomear colunas
         renomear = {}
         for col in df.columns:
             nome_normalizado = normalizar(col)
             if nome_normalizado in colunas_esperadas:
                 renomear[col] = colunas_esperadas[nome_normalizado]
-
         df = df.rename(columns=renomear)
 
-        # Verificar se todas as colunas essenciais foram encontradas
         faltando = [v for v in colunas_esperadas.values() if v not in df.columns]
         if faltando:
             st.error(f"Colunas ausentes no arquivo: {', '.join(faltando)}")
@@ -57,24 +46,29 @@ if arquivo:
 
             df_filtrado = df[df['Subgrupo'] == subgrupo_selecionado]
             produtos_codigos = df_filtrado[['Produto', 'Codigo']].drop_duplicates()
+            produtos_codigos['Identificador'] = produtos_codigos['Produto'] + " (Cód. " + produtos_codigos['Codigo'].astype(str) + ")"
 
-            for _, row in produtos_codigos.iterrows():
-                produto = row['Produto']
-                codigo = row['Codigo']
-                st.markdown(f"### 📦 Produto: {produto} (Código: {codigo})")
+            produto_selecionado = st.selectbox("Selecione o produto", produtos_codigos['Identificador'])
 
-                df_prod = df_filtrado[df_filtrado['Codigo'] == codigo][['Data', 'Quantidade Vendida']].copy()
-                df_prod = df_prod.rename(columns={"Data": "ds", "Quantidade Vendida": "y"})
-                df_prod['ds'] = pd.to_datetime(df_prod['ds'])
+            # Buscar produto e código selecionado
+            linha = produtos_codigos[produtos_codigos['Identificador'] == produto_selecionado].iloc[0]
+            produto = linha['Produto']
+            codigo = linha['Codigo']
 
-                modelo = Prophet()
-                modelo.fit(df_prod)
+            st.markdown(f"### 📦 Produto: {produto} (Código: {codigo})")
 
-                futuro = modelo.make_future_dataframe(periods=meses, freq='M')
-                previsao = modelo.predict(futuro)
+            df_prod = df_filtrado[df_filtrado['Codigo'] == codigo][['Data', 'Quantidade Vendida']].copy()
+            df_prod = df_prod.rename(columns={"Data": "ds", "Quantidade Vendida": "y"})
+            df_prod['ds'] = pd.to_datetime(df_prod['ds'])
 
-                fig1 = modelo.plot(previsao)
-                st.pyplot(fig1)
+            modelo = Prophet()
+            modelo.fit(df_prod)
+
+            futuro = modelo.make_future_dataframe(periods=meses, freq='M')
+            previsao = modelo.predict(futuro)
+
+            fig1 = modelo.plot(previsao)
+            st.pyplot(fig1)
 
     except Exception as e:
         st.error(f"Erro ao processar o arquivo HTML: {e}")
