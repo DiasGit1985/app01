@@ -1,12 +1,12 @@
 import streamlit as st
 import pandas as pd
 from prophet import Prophet
-import matplotlib.pyplot as plt
 import unicodedata
 import io
+from fpdf import FPDF
 
-st.set_page_config(page_title="Previsão de Vendas ERP (Completa)", layout="wide")
-st.title("📈 Previsão de Vendas por Produto - ERP HTML")
+st.set_page_config(page_title="Previsão de Compras - Simplificado", layout="wide")
+st.title("📦 Previsão de Vendas para Requisição de Compras")
 
 def normalizar(col):
     return unicodedata.normalize("NFKD", col).encode("ASCII", "ignore").decode("utf-8").lower().replace(" ", "").replace("_", "")
@@ -27,7 +27,7 @@ if arquivo:
         tabelas = pd.read_html(arquivo, header=1)
         df = tabelas[0]
 
-        st.subheader("Pré-visualização da tabela principal")
+        st.subheader("📑 Pré-visualização da planilha principal (dados brutos)")
         st.dataframe(df.head())
 
         renomear = {}
@@ -42,6 +42,8 @@ if arquivo:
             st.error(f"Colunas ausentes no arquivo: {', '.join(faltando)}")
         else:
             df = df[df['Tipo'] == 'S']
+            df['Data'] = pd.to_datetime(df['Data'])
+
             subgrupos = df['Subgrupo'].unique()
             subgrupo_selecionado = st.selectbox("Selecione o subgrupo", subgrupos)
             meses = st.slider("Quantos meses deseja prever?", 1, 12, 3)
@@ -50,66 +52,90 @@ if arquivo:
             produtos_codigos = df_filtrado[['Produto', 'Codigo']].drop_duplicates()
             produtos_codigos['Identificador'] = produtos_codigos['Produto'] + " (Cód. " + produtos_codigos['Codigo'].astype(str) + ")"
 
-            produto_selecionado = st.selectbox("Selecione o produto para visualizar o gráfico", produtos_codigos['Identificador'])
+            produto_selecionado = st.selectbox("Selecione o produto para exibir as previsões", produtos_codigos['Identificador'])
 
             linha = produtos_codigos[produtos_codigos['Identificador'] == produto_selecionado].iloc[0]
             produto = linha['Produto']
             codigo = linha['Codigo']
 
-            st.markdown(f"### 📦 Produto: {produto} (Código: {codigo})")
-            df_prod = df_filtrado[df_filtrado['Codigo'] == codigo][['Data', 'Quantidade Vendida']].copy()
-            df_prod = df_prod.rename(columns={"Data": "ds", "Quantidade Vendida": "y"})
-            df_prod['ds'] = pd.to_datetime(df_prod['ds'])
+            st.markdown(f"### 📊 Previsão para: **{produto}** (Código: {codigo})")
+
+            df_item = df_filtrado[df_filtrado['Codigo'] == codigo][['Data', 'Quantidade Vendida']].copy()
+            df_item = df_item.rename(columns={"Data": "ds", "Quantidade Vendida": "y"})
+            df_item['ds'] = pd.to_datetime(df_item['ds'])
 
             modelo = Prophet()
-            modelo.fit(df_prod)
+            modelo.fit(df_item)
             futuro = modelo.make_future_dataframe(periods=meses, freq='M')
             previsao = modelo.predict(futuro)
 
-            fig1 = modelo.plot(previsao)
-            fig1.set_size_inches(10, 4)
-            st.pyplot(fig1)
+            previsoes_final = previsao[['ds', 'yhat']].tail(meses).copy()
+            previsoes_final = previsoes_final.rename(columns={
+                'ds': 'Mês Previsto',
+                'yhat': 'Quantidade Prevista'
+            })
+            previsoes_final['Mês Previsto'] = previsoes_final['Mês Previsto'].dt.to_period('M').astype(str)
 
-            # TABELA GERAL DE PREVISÕES
-            st.markdown("### 📊 Previsões para todos os produtos do subgrupo selecionado")
-            tabela_geral = []
+            # Comparativo com média dos últimos 3 meses reais
+            ultimos_meses_real = df_item.sort_values(by="ds").tail(90)
+            media_ultimos = ultimos_meses_real['y'].mean()
+            media_previsao = previsoes_final['Quantidade Prevista'].mean()
 
-            for _, row in produtos_codigos.iterrows():
-                produto = row['Produto']
-                codigo = row['Codigo']
-                dados = df_filtrado[df_filtrado['Codigo'] == codigo][['Data', 'Quantidade Vendida']].copy()
-                dados = dados.rename(columns={"Data": "ds", "Quantidade Vendida": "y"})
-                dados['ds'] = pd.to_datetime(dados['ds'])
+            delta = media_previsao - media_ultimos
+            cor = "🟢 Aumentando" if delta > 0 else "🔴 Reduzindo" if delta < 0 else "🟡 Estável"
 
-                if len(dados) >= 2:
+            st.metric("Tendência de Vendas", value=f"{cor}", delta=f"{delta:.1f} unidades")
+
+            st.dataframe(previsoes_final)
+
+            # Total previsto para subgrupo
+            total_geral = 0
+            for cod in produtos_codigos['Codigo'].unique():
+                df_temp = df_filtrado[df_filtrado['Codigo'] == cod][['Data', 'Quantidade Vendida']].copy()
+                df_temp = df_temp.rename(columns={"Data": "ds", "Quantidade Vendida": "y"})
+                df_temp['ds'] = pd.to_datetime(df_temp['ds'])
+
+                if len(df_temp) >= 2:
                     modelo = Prophet()
-                    modelo.fit(dados)
+                    modelo.fit(df_temp)
                     futuro = modelo.make_future_dataframe(periods=meses, freq='M')
-                    previsoes = modelo.predict(futuro)
-                    previsoes_final = previsoes[['ds', 'yhat']].tail(meses).copy()
-                    previsoes_final['Produto'] = produto
-                    previsoes_final['Codigo'] = codigo
-                    tabela_geral.append(previsoes_final)
+                    previsao_temp = modelo.predict(futuro)
+                    total_geral += previsao_temp['yhat'].tail(meses).sum()
 
-            if tabela_geral:
-                df_previsao_final = pd.concat(tabela_geral, ignore_index=True)
-                df_previsao_final = df_previsao_final[['ds', 'Produto', 'Codigo', 'yhat']]
-                df_previsao_final = df_previsao_final.rename(columns={
-                    'ds': 'Data Prevista',
-                    'yhat': 'Quantidade Prevista'
-                })
+            st.info(f"📦 Previsão total para o subgrupo **{subgrupo_selecionado}** nos próximos {meses} meses: **{int(total_geral)} unidades**")
 
-                st.dataframe(df_previsao_final)
+            # Exportar Excel
+            buffer = io.BytesIO()
+            with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+                previsoes_final.to_excel(writer, index=False, sheet_name="Previsao_Selecionado")
 
-                buffer = io.BytesIO()
-                with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
-                    df_previsao_final.to_excel(writer, index=False, sheet_name="Previsões")
+            st.download_button(
+                label="📥 Baixar previsão deste item em Excel",
+                data=buffer.getvalue(),
+                file_name=f"previsao_{codigo}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
 
+            # PDF para o comprador
+            if st.button("📤 Gerar PDF para enviar ao comprador"):
+                pdf = FPDF()
+                pdf.add_page()
+                pdf.set_font("Arial", "B", 12)
+                pdf.cell(200, 10, f"Previsão de Vendas - Produto {produto} (Código: {codigo})", ln=True)
+                pdf.ln(5)
+                pdf.set_font("Arial", "", 10)
+                for i, row in previsoes_final.iterrows():
+                    pdf.cell(200, 8, f"{row['Mês Previsto']}: {row['Quantidade Prevista']:.0f} unidades", ln=True)
+                pdf.ln(5)
+                pdf.set_font("Arial", "I", 9)
+                pdf.cell(200, 10, f"Tendência: {cor} | Total previsto no subgrupo: {int(total_geral)} unidades", ln=True)
+                pdf_output = io.BytesIO()
+                pdf.output(pdf_output)
                 st.download_button(
-                    label="📥 Baixar todas as previsões em Excel",
-                    data=buffer.getvalue(),
-                    file_name="previsoes_gerais.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    label="📄 Baixar PDF para o comprador",
+                    data=pdf_output.getvalue(),
+                    file_name=f"Previsao_Comprador_{codigo}.pdf",
+                    mime="application/pdf"
                 )
 
     except Exception as e:
