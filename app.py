@@ -3,8 +3,9 @@ import pandas as pd
 from prophet import Prophet
 import matplotlib.pyplot as plt
 import unicodedata
+import io
 
-st.set_page_config(page_title="Previsão de Vendas ERP (Final)", layout="wide")
+st.set_page_config(page_title="Previsão de Vendas ERP (Completa)", layout="wide")
 st.title("📈 Previsão de Vendas por Produto - ERP HTML")
 
 def normalizar(col):
@@ -29,7 +30,6 @@ if arquivo:
         st.subheader("Pré-visualização da tabela principal")
         st.dataframe(df.head())
 
-        # Renomear colunas
         renomear = {}
         for col in df.columns:
             nome_normalizado = normalizar(col)
@@ -98,13 +98,13 @@ if arquivo:
                     'ds': 'Data Prevista',
                     'yhat': 'Quantidade Prevista'
                 })
+
                 st.dataframe(df_previsao_final)
 
-                # Gerar arquivo Excel para download
-                import io
                 buffer = io.BytesIO()
                 with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
                     df_previsao_final.to_excel(writer, index=False, sheet_name="Previsões")
+
                 st.download_button(
                     label="📥 Baixar todas as previsões em Excel",
                     data=buffer.getvalue(),
